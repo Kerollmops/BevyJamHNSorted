@@ -6,6 +6,7 @@ edition = "2021"
 [dependencies]
 anyhow = "1.0.54"
 chrono = { version = "0.4.19", features = ["serde"] }
+human-duration = "0.1.0"
 minreq = { version = "2.5.1", features = ["json-using-serde", "proxy", "https", "punycode"] }
 ordered-float = "2.10.0"
 serde = { version = "1.0.136", features = ["derive"] }

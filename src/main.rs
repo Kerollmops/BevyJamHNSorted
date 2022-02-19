@@ -1,6 +1,8 @@
+use std::time::Duration;
 use std::{env, fmt};
 
 use chrono::{DateTime, Utc};
+use human_duration::human_duration;
 use ordered_float::OrderedFloat;
 use serde::Deserialize;
 
@@ -18,11 +20,20 @@ fn main() -> anyhow::Result<()> {
     messages.retain(|m| m.edited_timestamp.is_none()); // remove edited posts
     messages.sort_unstable_by_key(|m| OrderedFloat(m.score(&now)));
 
-    for message in messages {
-        println!("{}", message);
+    for (i, message) in messages.into_iter().rev().enumerate() {
+        let elapsed = (now - message.timestamp).to_std().unwrap();
+        let elapsed = format!("({}ago)", human_readable_duration(&elapsed));
+        println!("#{:<3} {:15} {}", i + 1, elapsed, message);
     }
 
     Ok(())
+}
+
+fn human_readable_duration(duration: &Duration) -> String {
+    let mut s = human_duration(duration);
+    let tail_length = s.splitn(3, ' ').nth(2).map_or(0, |s| s.len());
+    s.truncate(s.len() - tail_length);
+    s
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -41,10 +52,14 @@ impl Message {
         self.reactions.iter().map(|r| if r.emoji.name == "👍" { r.count } else { 0 }).sum()
     }
 
+    fn elapsed_hours(&self, now: &DateTime<Utc>) -> i64 {
+        (*now - self.timestamp).num_hours()
+    }
+
     fn score(&self, now: &DateTime<Utc>) -> f32 {
         let upvotes = self.reactions_count() as f32;
-        let elapsed_hour = (*now - self.timestamp).num_hours() as f32;
-        upvotes / (elapsed_hour + 2.0).powf(GRAVITY)
+        let elapsed_hours = self.elapsed_hours(now) as f32;
+        upvotes / (elapsed_hours + 1.).powf(GRAVITY)
     }
 }
 
