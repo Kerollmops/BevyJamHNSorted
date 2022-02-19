@@ -11,9 +11,10 @@ const GRAVITY: f32 = 1.8;
 fn main() -> anyhow::Result<()> {
     let authorization = env::var("DISCORD_AUTHORIZATION").unwrap();
     let channelid = "937158195007348786";
-    let response = minreq::get(format!("https://discord.com/api/v9/channels/{channelid}/messages"))
-        .with_header("Authorization", authorization)
-        .send()?;
+    let response =
+        minreq::get(format!("https://discord.com/api/v9/channels/{channelid}/messages?limit=100"))
+            .with_header("Authorization", authorization)
+            .send()?;
 
     let now = Utc::now();
     let mut messages: Vec<Message> = response.json()?;
