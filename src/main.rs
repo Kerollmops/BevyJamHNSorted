@@ -7,21 +7,42 @@ use ordered_float::OrderedFloat;
 use serde::Deserialize;
 
 const GRAVITY: f32 = 1.8;
+const MESSAGES_LIMIT: usize = 100;
 
 fn main() -> anyhow::Result<()> {
     let authorization = env::var("DISCORD_AUTHORIZATION").unwrap();
     let channelid = "937158195007348786";
-    let response =
-        minreq::get(format!("https://discord.com/api/v9/channels/{channelid}/messages?limit=100"))
-            .with_header("Authorization", authorization)
-            .send()?;
+
+    let mut all_messages = Vec::new();
+    let mut before_message = None;
+
+    loop {
+        let url = match before_message {
+            Some(before) => format!(
+                "https://discord.com/api/v9/channels/{channelid}/messages?limit={MESSAGES_LIMIT}&before={before}"
+            ),
+            None => format!("https://discord.com/api/v9/channels/{channelid}/messages?limit={MESSAGES_LIMIT}"),
+        };
+
+        let messages: Vec<Message> =
+            minreq::get(url).with_header("Authorization", &authorization).send()?.json()?;
+        let messages_count = messages.len();
+
+        all_messages.extend(messages);
+
+        match all_messages.last() {
+            Some(last) if messages_count == MESSAGES_LIMIT => {
+                before_message = Some(last.id.clone())
+            }
+            _ => break,
+        }
+    }
 
     let now = Utc::now();
-    let mut messages: Vec<Message> = response.json()?;
-    messages.retain(|m| m.edited_timestamp.is_none()); // remove edited posts
-    messages.sort_unstable_by_key(|m| OrderedFloat(m.score(&now)));
+    all_messages.retain(|m| m.edited_timestamp.is_none()); // remove edited posts
+    all_messages.sort_unstable_by_key(|m| OrderedFloat(m.score(&now)));
 
-    for (i, message) in messages.into_iter().rev().enumerate() {
+    for (i, message) in all_messages.into_iter().rev().enumerate() {
         let elapsed = (now - message.timestamp).to_std().unwrap();
         let elapsed = format!("({}ago)", human_readable_duration(&elapsed));
         println!("#{:<3} {:15} {}", i + 1, elapsed, message);
