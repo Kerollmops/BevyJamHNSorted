@@ -1,6 +1,7 @@
 use std::time::Duration;
 use std::{env, fmt};
 
+use anyhow::bail;
 use chrono::{DateTime, Utc};
 use human_duration::human_duration;
 use ordered_float::OrderedFloat;
@@ -9,9 +10,26 @@ use serde::Deserialize;
 const GRAVITY: f32 = 1.8;
 const MESSAGES_LIMIT: usize = 100;
 
+enum Sort {
+    ByScore,
+    ByReactions,
+    ByReactionsThroughput,
+}
+
 fn main() -> anyhow::Result<()> {
     let authorization = env::var("DISCORD_AUTHORIZATION").unwrap();
     let channelid = "937158195007348786";
+
+    let sort = match env::args().nth(1).as_ref().map(AsRef::as_ref) {
+        Some("--sort-by-score") => Sort::ByScore,
+        Some("--sort-by-reactions") => Sort::ByReactions,
+        Some("--sort-by-reactions-throughput") => Sort::ByReactionsThroughput,
+        Some(_) => bail!(
+            "invalid argument, please use \
+            `--sort-by-score`, `--sort-by-reactions` or `--sort-by-reactions-throughput`"
+        ),
+        None => Sort::ByReactions,
+    };
 
     let mut all_messages = Vec::new();
     let mut before_message = None;
@@ -40,12 +58,24 @@ fn main() -> anyhow::Result<()> {
 
     let now = Utc::now();
     all_messages.retain(|m| m.edited_timestamp.is_none()); // remove edited posts
-    all_messages.sort_unstable_by_key(|m| OrderedFloat(m.score(&now)));
+    match sort {
+        Sort::ByScore => all_messages.sort_unstable_by_key(|m| OrderedFloat(m.score(&now))),
+        Sort::ByReactions => all_messages.sort_unstable_by_key(Message::reactions_count),
+        Sort::ByReactionsThroughput => all_messages.sort_unstable_by_key(|m| {
+            let elapsed = now - m.timestamp;
+            let num_hours = elapsed.num_hours() as f32;
+            let num_mins = elapsed.num_minutes() as f32 / 60.;
+            let throughput = m.reactions_count() as f32 / (num_hours + num_mins);
+            OrderedFloat(throughput)
+        }),
+    }
 
     for (i, message) in all_messages.into_iter().rev().enumerate() {
-        let elapsed = (now - message.timestamp).to_std().unwrap();
-        let elapsed = format!("({}ago)", human_readable_duration(&elapsed));
-        println!("#{:<3} {:15} {}", i + 1, elapsed, message);
+        let elapsed = now - message.timestamp;
+        let throughput = message.reactions_count() as f32 / elapsed.num_hours() as f32;
+        let human_readable_duration = human_readable_duration(&elapsed.to_std().unwrap()) + "ago,";
+        let elapsed = format!("({:<12} {:.02?}👍/h)", human_readable_duration, throughput);
+        println!("#{:<3} {:25} {}", i + 1, elapsed, message);
     }
 
     Ok(())
@@ -61,7 +91,8 @@ fn human_readable_duration(duration: &Duration) -> String {
 #[derive(Debug, Clone, Deserialize)]
 struct Message {
     id: String,
-    channel_id: String,
+    #[serde(rename = "channel_id")]
+    _channel_id: String,
     content: String,
     #[serde(default)]
     reactions: Vec<Reaction>,
@@ -95,7 +126,8 @@ impl fmt::Display for Message {
 struct Reaction {
     count: usize,
     emoji: Emoji,
-    me: bool,
+    #[serde(rename = "me")]
+    _me: bool,
 }
 
 #[derive(Debug, Clone, Deserialize)]
